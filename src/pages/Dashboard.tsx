@@ -1,4 +1,4 @@
-import { Heart, Wind, MapPin, ThermometerSun, Droplets, AlertTriangle, Loader2, Bell } from 'lucide-react';
+import { Heart, Wind, MapPin, ThermometerSun, Droplets, AlertTriangle, Loader2, Bell, TrendingUp, Calendar } from 'lucide-react';
 import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, SensorReading } from '../lib/supabase';
@@ -13,6 +13,30 @@ interface CriticalAlert {
   readingsChanged: boolean;
 }
 
+interface MonthlyStats {
+  minerId: string;
+  rfid: string;
+  month: string;
+  avgHeartRate: number;
+  avgAirToxicity: number;
+  avgTemperature: number;
+  avgHumidity: number;
+  totalReadings: number;
+  criticalAlerts: number;
+  warningAlerts: number;
+  hoursWorked: number;
+}
+
+interface DailyStats {
+  date: string;
+  avgHeartRate: number;
+  avgAirToxicity: number;
+  avgTemperature: number;
+  avgHumidity: number;
+  criticalAlerts: number;
+  totalReadings: number;
+}
+
 export default function Dashboard() {
   const { user, profile } = useAuth();
   const [sensorData, setSensorData] = useState<SensorReading[]>([]);
@@ -23,6 +47,11 @@ export default function Dashboard() {
   const criticalAlertsRef = useRef<Map<string, CriticalAlert>>(new Map());
   const [activeAlerts, setActiveAlerts] = useState<string[]>([]);
   const [criticalMinerModal, setCriticalMinerModal] = useState<SensorReading | null>(null);
+  const [monthlyStats, setMonthlyStats] = useState<MonthlyStats[]>([]);
+  const [showMonthlyStats, setShowMonthlyStats] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState<string>('');
+  const [loadingStats, setLoadingStats] = useState(false);
+  const [dailyStatsMap, setDailyStatsMap] = useState<Map<string, DailyStats[]>>(new Map());
 
   useEffect(() => {
     if (!user) {
@@ -32,6 +61,7 @@ export default function Dashboard() {
     }
 
     loadSensorData();
+    loadMonthlyStats();
 
     const interval = setInterval(() => {
       loadSensorData();
@@ -39,6 +69,172 @@ export default function Dashboard() {
 
     return () => clearInterval(interval);
   }, [user, profile]);
+
+  const loadMonthlyStats = async () => {
+    setLoadingStats(true);
+    try {
+      let query = supabase
+        .from('sensor_readings')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (profile?.role === 'miner' && profile.rfid) {
+        query = query.eq('rfid', profile.rfid);
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+
+      if (data && data.length > 0) {
+        const stats = calculateMonthlyStats(data);
+        setMonthlyStats(stats);
+
+        const dailyStats = calculateDailyStats(data);
+        setDailyStatsMap(dailyStats);
+
+        if (stats.length > 0 && !selectedMonth) {
+          setSelectedMonth(stats[0].month);
+        }
+      }
+    } catch (err) {
+      console.error('Error loading monthly stats:', err);
+    } finally {
+      setLoadingStats(false);
+    }
+  };
+
+  const calculateMonthlyStats = (data: SensorReading[]): MonthlyStats[] => {
+    const statsByMinerAndMonth = new Map<string, {
+      minerId: string;
+      rfid: string;
+      month: string;
+      readings: SensorReading[];
+    }>();
+
+    data.forEach((reading) => {
+      const date = new Date(reading.created_at);
+      const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      const key = `${reading.miner_id}-${monthKey}`;
+
+      if (!statsByMinerAndMonth.has(key)) {
+        statsByMinerAndMonth.set(key, {
+          minerId: reading.miner_id,
+          rfid: reading.rfid || '',
+          month: monthKey,
+          readings: [],
+        });
+      }
+
+      statsByMinerAndMonth.get(key)!.readings.push(reading);
+    });
+
+    const stats: MonthlyStats[] = [];
+
+    statsByMinerAndMonth.forEach((value) => {
+      const { minerId, rfid, month, readings } = value;
+
+      const avgHeartRate = readings.reduce((sum, r) => sum + r.heart_rate, 0) / readings.length;
+      const avgAirToxicity = readings.reduce((sum, r) => sum + r.air_toxicity, 0) / readings.length;
+      const avgTemperature = readings.reduce((sum, r) => sum + r.temperature, 0) / readings.length;
+      const avgHumidity = readings.reduce((sum, r) => sum + r.humidity, 0) / readings.length;
+
+      const criticalAlerts = readings.filter(r => r.heart_rate > 100 || r.air_toxicity > 20).length;
+      const warningAlerts = readings.filter(r =>
+        (r.heart_rate > 90 && r.heart_rate <= 100) ||
+        (r.air_toxicity > 15 && r.air_toxicity <= 20)
+      ).length;
+
+      const sortedReadings = [...readings].sort((a, b) =>
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      );
+      const firstReading = new Date(sortedReadings[0].created_at).getTime();
+      const lastReading = new Date(sortedReadings[sortedReadings.length - 1].created_at).getTime();
+      const hoursWorked = (lastReading - firstReading) / (1000 * 60 * 60);
+
+      stats.push({
+        minerId,
+        rfid,
+        month,
+        avgHeartRate,
+        avgAirToxicity,
+        avgTemperature,
+        avgHumidity,
+        totalReadings: readings.length,
+        criticalAlerts,
+        warningAlerts,
+        hoursWorked,
+      });
+    });
+
+    return stats.sort((a, b) => b.month.localeCompare(a.month));
+  };
+
+  const calculateDailyStats = (data: SensorReading[]): Map<string, DailyStats[]> => {
+    const statsByMinerAndDay = new Map<string, Map<string, SensorReading[]>>();
+
+    data.forEach((reading) => {
+      const date = new Date(reading.created_at);
+      const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      const minerId = reading.miner_id;
+
+      if (!statsByMinerAndDay.has(minerId)) {
+        statsByMinerAndDay.set(minerId, new Map());
+      }
+
+      const minerDays = statsByMinerAndDay.get(minerId)!;
+      if (!minerDays.has(dateKey)) {
+        minerDays.set(dateKey, []);
+      }
+
+      minerDays.get(dateKey)!.push(reading);
+    });
+
+    const dailyStatsMap = new Map<string, DailyStats[]>();
+
+    statsByMinerAndDay.forEach((days, minerId) => {
+      const dailyStats: DailyStats[] = [];
+
+      days.forEach((readings, dateKey) => {
+        const avgHeartRate = readings.reduce((sum, r) => sum + r.heart_rate, 0) / readings.length;
+        const avgAirToxicity = readings.reduce((sum, r) => sum + r.air_toxicity, 0) / readings.length;
+        const avgTemperature = readings.reduce((sum, r) => sum + r.temperature, 0) / readings.length;
+        const avgHumidity = readings.reduce((sum, r) => sum + r.humidity, 0) / readings.length;
+        const criticalAlerts = readings.filter(r => r.heart_rate > 100 || r.air_toxicity > 20).length;
+
+        dailyStats.push({
+          date: dateKey,
+          avgHeartRate,
+          avgAirToxicity,
+          avgTemperature,
+          avgHumidity,
+          criticalAlerts,
+          totalReadings: readings.length,
+        });
+      });
+
+      dailyStats.sort((a, b) => a.date.localeCompare(b.date));
+      dailyStatsMap.set(minerId, dailyStats);
+    });
+
+    return dailyStatsMap;
+  };
+
+  const getDataRangeInfo = (dailyStats: DailyStats[]) => {
+    if (!dailyStats || dailyStats.length === 0) return '';
+
+    const firstDate = new Date(dailyStats[0].date);
+    const lastDate = new Date(dailyStats[dailyStats.length - 1].date);
+    const daysDiff = Math.floor((lastDate.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+
+    return `${dailyStats.length} day${dailyStats.length > 1 ? 's' : ''} of data (${daysDiff} day span)`;
+  };
+
+  const getMonthName = (monthKey: string) => {
+    const [year, month] = monthKey.split('-');
+    const date = new Date(parseInt(year), parseInt(month) - 1);
+    return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  };
 
   const checkCriticalCondition = (heartRate: number, airToxicity: number): boolean => {
     return heartRate > 100 || airToxicity > 20;
@@ -299,25 +495,35 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {profile?.role === 'admin' && zones.length > 1 && (
-          <div className="mb-6">
-            <label htmlFor="zone-filter" className="block text-sm font-semibold text-gray-700 mb-2">
-              Filter by Zone
-            </label>
-            <select
-              id="zone-filter"
-              value={selectedZone}
-              onChange={(e) => setSelectedZone(e.target.value)}
-              className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
-            >
-              {zones.map((zone) => (
-                <option key={zone} value={zone}>
-                  {zone === 'all' ? 'All Zones' : zone}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
+        <div className="flex gap-4 mb-6 items-end">
+          {profile?.role === 'admin' && zones.length > 1 && (
+            <div className="flex-1">
+              <label htmlFor="zone-filter" className="block text-sm font-semibold text-gray-700 mb-2">
+                Filter by Zone
+              </label>
+              <select
+                id="zone-filter"
+                value={selectedZone}
+                onChange={(e) => setSelectedZone(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+              >
+                {zones.map((zone) => (
+                  <option key={zone} value={zone}>
+                    {zone === 'all' ? 'All Zones' : zone}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <button
+            onClick={() => setShowMonthlyStats(!showMonthlyStats)}
+            className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors flex items-center gap-2 shadow-md"
+          >
+            <TrendingUp className="w-5 h-5" />
+            {showMonthlyStats ? 'Hide' : 'Show'} Monthly Stats
+          </button>
+        </div>
 
         {activeAlerts.length > 0 && (
           <div className="mb-6 bg-red-600 text-white rounded-xl shadow-lg p-6 animate-pulse">
@@ -331,6 +537,336 @@ export default function Dashboard() {
                 </p>
               </div>
             </div>
+          </div>
+        )}
+
+        {showMonthlyStats && (
+          <div className="mb-6 bg-white rounded-xl shadow-lg p-6">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <Calendar className="w-7 h-7 text-blue-600" />
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900">Historical Statistics</h2>
+                  <p className="text-sm text-gray-600">Showing all available data</p>
+                </div>
+              </div>
+              {monthlyStats.length > 0 && (
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(e.target.value)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  {Array.from(new Set(monthlyStats.map(s => s.month))).map((month) => (
+                    <option key={month} value={month}>
+                      {getMonthName(month)}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            {loadingStats ? (
+              <div className="text-center py-8">
+                <Loader2 className="w-8 h-8 text-blue-500 animate-spin mx-auto mb-2" />
+                <p className="text-gray-600">Loading statistics...</p>
+              </div>
+            ) : monthlyStats.length === 0 ? (
+              <div className="text-center py-8">
+                <Calendar className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+                <p className="text-gray-600">No statistics available yet.</p>
+                <p className="text-sm text-gray-500 mt-2">Statistics will appear once sensor data is collected.</p>
+              </div>
+            ) : (
+              <>
+                <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <p className="text-sm text-blue-800">
+                    <strong>Data Range:</strong> Showing all available historical data.
+                    {monthlyStats.length === 1 && dailyStatsMap.size > 0 ? (
+                      <span className="ml-1">
+                        {Array.from(dailyStatsMap.values())[0]?.length === 1
+                          ? 'Currently displaying single day of data.'
+                          : `Currently displaying ${Array.from(dailyStatsMap.values())[0]?.length} days of data.`}
+                      </span>
+                    ) : (
+                      <span className="ml-1">
+                        Data spans across {monthlyStats.length} month{monthlyStats.length > 1 ? 's' : ''}.
+                      </span>
+                    )}
+                  </p>
+                </div>
+              <div className="grid gap-4">
+                {monthlyStats
+                  .filter(stat => stat.month === selectedMonth)
+                  .map((stat) => (
+                    <div
+                      key={`${stat.minerId}-${stat.month}`}
+                      className="border-2 border-gray-200 rounded-lg p-5 hover:border-blue-300 transition-colors"
+                    >
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <h3 className="text-xl font-bold text-slate-900">
+                            Miner {stat.minerId}
+                          </h3>
+                          {stat.rfid && (
+                            <p className="text-sm text-gray-600">RFID: {stat.rfid}</p>
+                          )}
+                        </div>
+                        <div className="text-right">
+                          <p className="text-2xl font-bold text-blue-600">
+                            {stat.hoursWorked.toFixed(1)}h
+                          </p>
+                          <p className="text-xs text-gray-600">Hours Worked</p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                        <div className="bg-gradient-to-br from-red-50 to-red-100 rounded-lg p-3 border border-red-200">
+                          <div className="flex items-center gap-2 mb-1">
+                            <Heart className="w-4 h-4 text-red-600" />
+                            <span className="text-xs font-semibold text-gray-700">Avg Heart Rate</span>
+                          </div>
+                          <p className="text-xl font-bold text-slate-900">
+                            {stat.avgHeartRate.toFixed(0)}
+                          </p>
+                          <p className="text-xs text-gray-600">BPM</p>
+                        </div>
+
+                        <div className="bg-gradient-to-br from-amber-50 to-amber-100 rounded-lg p-3 border border-amber-200">
+                          <div className="flex items-center gap-2 mb-1">
+                            <Wind className="w-4 h-4 text-amber-600" />
+                            <span className="text-xs font-semibold text-gray-700">Avg Air Toxicity</span>
+                          </div>
+                          <p className="text-xl font-bold text-slate-900">
+                            {stat.avgAirToxicity.toFixed(1)}
+                          </p>
+                          <p className="text-xs text-gray-600">PPM</p>
+                        </div>
+
+                        <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg p-3 border border-orange-200">
+                          <div className="flex items-center gap-2 mb-1">
+                            <ThermometerSun className="w-4 h-4 text-orange-600" />
+                            <span className="text-xs font-semibold text-gray-700">Avg Temp</span>
+                          </div>
+                          <p className="text-xl font-bold text-slate-900">
+                            {stat.avgTemperature.toFixed(1)}
+                          </p>
+                          <p className="text-xs text-gray-600">°C</p>
+                        </div>
+
+                        <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-3 border border-blue-200">
+                          <div className="flex items-center gap-2 mb-1">
+                            <Droplets className="w-4 h-4 text-blue-600" />
+                            <span className="text-xs font-semibold text-gray-700">Avg Humidity</span>
+                          </div>
+                          <p className="text-xl font-bold text-slate-900">
+                            {stat.avgHumidity.toFixed(0)}
+                          </p>
+                          <p className="text-xs text-gray-600">%</p>
+                        </div>
+
+                        <div className="bg-gradient-to-br from-red-50 to-red-100 rounded-lg p-3 border border-red-200">
+                          <div className="flex items-center gap-2 mb-1">
+                            <AlertTriangle className="w-4 h-4 text-red-600" />
+                            <span className="text-xs font-semibold text-gray-700">Critical</span>
+                          </div>
+                          <p className="text-xl font-bold text-red-600">
+                            {stat.criticalAlerts}
+                          </p>
+                          <p className="text-xs text-gray-600">Alerts</p>
+                        </div>
+
+                        <div className="bg-gradient-to-br from-yellow-50 to-yellow-100 rounded-lg p-3 border border-yellow-200">
+                          <div className="flex items-center gap-2 mb-1">
+                            <AlertTriangle className="w-4 h-4 text-yellow-600" />
+                            <span className="text-xs font-semibold text-gray-700">Warning</span>
+                          </div>
+                          <p className="text-xl font-bold text-yellow-600">
+                            {stat.warningAlerts}
+                          </p>
+                          <p className="text-xs text-gray-600">Alerts</p>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 pt-3 border-t border-gray-200">
+                        <div className="flex items-center justify-between text-sm text-gray-600">
+                          <span>Total Readings: <strong className="text-slate-900">{stat.totalReadings}</strong></span>
+                          <span>
+                            Safety Score:
+                            <strong className={`ml-1 ${
+                              stat.criticalAlerts === 0 ? 'text-green-600' :
+                              stat.criticalAlerts < 5 ? 'text-yellow-600' : 'text-red-600'
+                            }`}>
+                              {stat.criticalAlerts === 0 ? 'Excellent' :
+                               stat.criticalAlerts < 5 ? 'Good' : 'Needs Attention'}
+                            </strong>
+                          </span>
+                        </div>
+                      </div>
+
+                      {dailyStatsMap.has(stat.minerId) && dailyStatsMap.get(stat.minerId)!.length > 0 && (
+                        <div className="mt-6">
+                          <div className="flex items-center justify-between mb-4">
+                            <h4 className="text-sm font-bold text-gray-700">
+                              Daily Trends
+                            </h4>
+                            <div className="text-xs text-gray-500">
+                              {getDataRangeInfo(dailyStatsMap.get(stat.minerId)!)}
+                            </div>
+                          </div>
+
+                          {dailyStatsMap.get(stat.minerId)!.length === 1 && (
+                            <div className="mb-4 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
+                              <strong>Note:</strong> Only one day of data available. Graphs will show more detail as more data is collected.
+                            </div>
+                          )}
+
+                          <div className="mb-6">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-xs font-semibold text-gray-600">Heart Rate (BPM)</span>
+                              <div className="flex items-center gap-2 text-xs text-gray-500">
+                                <span className="flex items-center gap-1">
+                                  <div className="w-3 h-0.5 bg-red-500"></div>
+                                  Critical (100+)
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <div className="w-3 h-0.5 bg-yellow-500"></div>
+                                  Warning (90-100)
+                                </span>
+                              </div>
+                            </div>
+                            <div className="relative h-32 bg-gradient-to-t from-gray-50 to-white border border-gray-200 rounded-lg p-3">
+                              <div className="absolute inset-x-3 top-3 bottom-3 flex items-end justify-between gap-1">
+                                {dailyStatsMap.get(stat.minerId)!.map((day, idx) => {
+                                  const maxHeartRate = Math.max(...dailyStatsMap.get(stat.minerId)!.map(d => d.avgHeartRate));
+                                  const height = (day.avgHeartRate / maxHeartRate) * 100;
+                                  const isWarning = day.avgHeartRate > 90 && day.avgHeartRate <= 100;
+                                  const isCritical = day.avgHeartRate > 100;
+
+                                  return (
+                                    <div key={idx} className="flex-1 flex flex-col justify-end h-full group relative">
+                                      <div
+                                        className={`w-full rounded-t transition-all ${
+                                          isCritical ? 'bg-red-500' :
+                                          isWarning ? 'bg-yellow-500' : 'bg-green-500'
+                                        }`}
+                                        style={{ height: `${height}%` }}
+                                      ></div>
+                                      <div className="absolute bottom-full mb-1 left-1/2 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap pointer-events-none z-10">
+                                        {new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}<br/>
+                                        {day.avgHeartRate.toFixed(0)} BPM
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mb-6">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-xs font-semibold text-gray-600">Air Toxicity (PPM)</span>
+                              <div className="flex items-center gap-2 text-xs text-gray-500">
+                                <span className="flex items-center gap-1">
+                                  <div className="w-3 h-0.5 bg-red-500"></div>
+                                  Critical (20+)
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <div className="w-3 h-0.5 bg-yellow-500"></div>
+                                  Warning (15-20)
+                                </span>
+                              </div>
+                            </div>
+                            <div className="relative h-32 bg-gradient-to-t from-gray-50 to-white border border-gray-200 rounded-lg p-3">
+                              <div className="absolute inset-x-3 top-3 bottom-3 flex items-end justify-between gap-1">
+                                {dailyStatsMap.get(stat.minerId)!.map((day, idx) => {
+                                  const maxToxicity = Math.max(...dailyStatsMap.get(stat.minerId)!.map(d => d.avgAirToxicity));
+                                  const height = (day.avgAirToxicity / maxToxicity) * 100;
+                                  const isWarning = day.avgAirToxicity > 15 && day.avgAirToxicity <= 20;
+                                  const isCritical = day.avgAirToxicity > 20;
+
+                                  return (
+                                    <div key={idx} className="flex-1 flex flex-col justify-end h-full group relative">
+                                      <div
+                                        className={`w-full rounded-t transition-all ${
+                                          isCritical ? 'bg-red-500' :
+                                          isWarning ? 'bg-yellow-500' : 'bg-green-500'
+                                        }`}
+                                        style={{ height: `${height}%` }}
+                                      ></div>
+                                      <div className="absolute bottom-full mb-1 left-1/2 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap pointer-events-none z-10">
+                                        {new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}<br/>
+                                        {day.avgAirToxicity.toFixed(1)} PPM
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mb-6">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-xs font-semibold text-gray-600">Temperature (°C)</span>
+                            </div>
+                            <div className="relative h-32 bg-gradient-to-t from-gray-50 to-white border border-gray-200 rounded-lg p-3">
+                              <div className="absolute inset-x-3 top-3 bottom-3 flex items-end justify-between gap-1">
+                                {dailyStatsMap.get(stat.minerId)!.map((day, idx) => {
+                                  const temps = dailyStatsMap.get(stat.minerId)!.map(d => d.avgTemperature);
+                                  const minTemp = Math.min(...temps);
+                                  const maxTemp = Math.max(...temps);
+                                  const range = maxTemp - minTemp || 1;
+                                  const height = ((day.avgTemperature - minTemp) / range) * 100;
+
+                                  return (
+                                    <div key={idx} className="flex-1 flex flex-col justify-end h-full group relative">
+                                      <div
+                                        className="w-full rounded-t bg-gradient-to-t from-orange-500 to-orange-400 transition-all"
+                                        style={{ height: `${height}%` }}
+                                      ></div>
+                                      <div className="absolute bottom-full mb-1 left-1/2 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap pointer-events-none z-10">
+                                        {new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}<br/>
+                                        {day.avgTemperature.toFixed(1)}°C
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-xs font-semibold text-gray-600">Daily Readings Count</span>
+                            </div>
+                            <div className="relative h-32 bg-gradient-to-t from-gray-50 to-white border border-gray-200 rounded-lg p-3">
+                              <div className="absolute inset-x-3 top-3 bottom-3 flex items-end justify-between gap-1">
+                                {dailyStatsMap.get(stat.minerId)!.map((day, idx) => {
+                                  const maxReadings = Math.max(...dailyStatsMap.get(stat.minerId)!.map(d => d.totalReadings));
+                                  const height = (day.totalReadings / maxReadings) * 100;
+
+                                  return (
+                                    <div key={idx} className="flex-1 flex flex-col justify-end h-full group relative">
+                                      <div
+                                        className="w-full rounded-t bg-gradient-to-t from-blue-500 to-blue-400 transition-all"
+                                        style={{ height: `${height}%` }}
+                                      ></div>
+                                      <div className="absolute bottom-full mb-1 left-1/2 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap pointer-events-none z-10">
+                                        {new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}<br/>
+                                        {day.totalReadings} readings
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+              </div>
+              </>
+            )}
           </div>
         )}
 
