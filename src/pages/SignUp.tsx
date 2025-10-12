@@ -1,47 +1,51 @@
-import { useState } from 'react';
-import { UserPlus, Loader2 } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
+"use client"
+
+import type React from "react"
+
+import { useState } from "react"
+import { UserPlus, Loader2 } from "lucide-react"
+import { useAuth } from "../contexts/AuthContext"
 
 interface SignUpProps {
-  onNavigate: (page: string) => void;
+  onNavigate: (page: string) => void
 }
 
 export default function SignUp({ onNavigate }: SignUpProps) {
-  const { signUp } = useAuth();
+  const { signUp } = useAuth()
   const [formData, setFormData] = useState({
-    fullName: '',
-    email: '',
-    password: '',
-    confirmPassword: '',
-    role: 'miner' as 'admin' | 'miner',
-    rfid: '',
-  });
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState(false);
+    fullName: "",
+    email: "",
+    password: "",
+    confirmPassword: "",
+    role: "miner" as "admin" | "miner",
+    rfid: "",
+  })
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState("")
+  const [success, setSuccess] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSubmitting(true);
-    setError('');
-    setSuccess(false);
+    e.preventDefault()
+    setIsSubmitting(true)
+    setError("")
+    setSuccess(false)
 
     if (formData.password !== formData.confirmPassword) {
-      setError('Passwords do not match');
-      setIsSubmitting(false);
-      return;
+      setError("Passwords do not match")
+      setIsSubmitting(false)
+      return
     }
 
     if (formData.password.length < 6) {
-      setError('Password must be at least 6 characters long');
-      setIsSubmitting(false);
-      return;
+      setError("Password must be at least 6 characters long")
+      setIsSubmitting(false)
+      return
     }
 
-    if (formData.role === 'miner' && !formData.rfid.trim()) {
-      setError('RFID is required for miner accounts');
-      setIsSubmitting(false);
-      return;
+    if (formData.role === "miner" && !formData.rfid.trim()) {
+      setError("RFID is required for miner accounts")
+      setIsSubmitting(false)
+      return
     }
 
     const { error: signUpError } = await signUp(
@@ -49,20 +53,20 @@ export default function SignUp({ onNavigate }: SignUpProps) {
       formData.password,
       formData.fullName,
       formData.role,
-      formData.role === 'miner' ? formData.rfid : undefined
-    );
+      formData.role === "miner" ? formData.rfid : undefined,
+    )
 
     if (signUpError) {
-      setError(signUpError.message || 'Failed to create account. Please try again.');
-      setIsSubmitting(false);
+      setError(signUpError.message || "Failed to create account. Please try again.")
+      setIsSubmitting(false)
     } else {
-      setSuccess(true);
-      setIsSubmitting(false);
+      setSuccess(true)
+      setIsSubmitting(false)
       setTimeout(() => {
-        onNavigate('login');
-      }, 2000);
+        onNavigate("home")
+      }, 1200)
     }
-  };
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
@@ -71,17 +75,13 @@ export default function SignUp({ onNavigate }: SignUpProps) {
       <div className="max-w-md w-full space-y-8 relative">
         <div className="text-center">
           <button
-            onClick={() => onNavigate('home')}
+            onClick={() => onNavigate("home")}
             className="text-4xl font-bold bg-gradient-to-r from-amber-400 to-orange-500 bg-clip-text text-transparent mb-2 hover:from-amber-300 hover:to-orange-400 transition-all"
           >
             SmartMine
           </button>
-          <h2 className="mt-6 text-3xl font-bold text-white">
-            Create your account
-          </h2>
-          <p className="mt-2 text-sm text-gray-400">
-            Join the mining safety system
-          </p>
+          <h2 className="mt-6 text-3xl font-bold text-white">Create your account</h2>
+          <p className="mt-2 text-sm text-gray-400">Join the mining safety system</p>
         </div>
 
         <div className="bg-white rounded-2xl shadow-2xl p-8">
@@ -94,9 +94,7 @@ export default function SignUp({ onNavigate }: SignUpProps) {
 
             {success && (
               <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                <p className="text-green-800 text-sm">
-                  Account created successfully! Redirecting to login...
-                </p>
+                <p className="text-green-800 text-sm">Account created and signed in! Redirecting...</p>
               </div>
             )}
 
@@ -139,7 +137,7 @@ export default function SignUp({ onNavigate }: SignUpProps) {
               <select
                 id="role"
                 value={formData.role}
-                onChange={(e) => setFormData({ ...formData, role: e.target.value as 'admin' | 'miner' })}
+                onChange={(e) => setFormData({ ...formData, role: e.target.value as "admin" | "miner" })}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all"
                 disabled={isSubmitting}
               >
@@ -147,13 +145,13 @@ export default function SignUp({ onNavigate }: SignUpProps) {
                 <option value="admin">Admin</option>
               </select>
               <p className="mt-1 text-xs text-gray-500">
-                {formData.role === 'miner'
-                  ? 'Miners can view their own statistics only'
-                  : 'Admins can view all miners statistics'}
+                {formData.role === "miner"
+                  ? "Miners can view their own statistics only"
+                  : "Admins can view all miners statistics"}
               </p>
             </div>
 
-            {formData.role === 'miner' && (
+            {formData.role === "miner" && (
               <div>
                 <label htmlFor="rfid" className="block text-sm font-semibold text-gray-700 mb-2">
                   RFID Tag
@@ -168,9 +166,7 @@ export default function SignUp({ onNavigate }: SignUpProps) {
                   placeholder="e.g., RFID-001"
                   disabled={isSubmitting}
                 />
-                <p className="mt-1 text-xs text-gray-500">
-                  Enter your unique RFID tag number
-                </p>
+                <p className="mt-1 text-xs text-gray-500">Enter your unique RFID tag number</p>
               </div>
             )}
 
@@ -227,9 +223,9 @@ export default function SignUp({ onNavigate }: SignUpProps) {
 
           <div className="mt-6 text-center">
             <p className="text-sm text-gray-600">
-              Already have an account?{' '}
+              Already have an account?{" "}
               <button
-                onClick={() => onNavigate('login')}
+                onClick={() => onNavigate("login")}
                 className="font-semibold text-amber-600 hover:text-amber-700 transition-colors"
               >
                 Sign in here
@@ -240,7 +236,7 @@ export default function SignUp({ onNavigate }: SignUpProps) {
 
         <div className="text-center">
           <button
-            onClick={() => onNavigate('home')}
+            onClick={() => onNavigate("home")}
             className="text-sm text-gray-400 hover:text-gray-300 transition-colors"
           >
             ← Back to home
@@ -248,5 +244,5 @@ export default function SignUp({ onNavigate }: SignUpProps) {
         </div>
       </div>
     </div>
-  );
+  )
 }
