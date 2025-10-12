@@ -52,13 +52,16 @@ export default function Navigation({ currentPage, onNavigate }: NavigationProps)
 
             {user && profile ? (
               <div className="flex items-center gap-4 ml-4 pl-4 border-l border-gray-700">
-                <div className="flex items-center gap-2 text-sm">
+                <button
+                  onClick={() => onNavigate('profile')}
+                  className="flex items-center gap-2 text-sm px-3 py-2 rounded-md hover:bg-slate-800 transition-colors"
+                >
                   <User className="w-4 h-4" />
                   <span className="text-gray-300">{profile.full_name}</span>
                   <span className="px-2 py-1 bg-amber-500 rounded text-xs font-semibold">
                     {profile.role}
                   </span>
-                </div>
+                </button>
                 <button
                   onClick={handleSignOut}
                   className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-300 hover:text-white hover:bg-slate-800 rounded-md transition-colors"
@@ -110,15 +113,21 @@ export default function Navigation({ currentPage, onNavigate }: NavigationProps)
 
             {user && profile ? (
               <div className="pt-2 mt-2 border-t border-gray-700 space-y-2">
-                <div className="px-3 py-2 text-sm text-gray-300">
-                  <div className="flex items-center gap-2 mb-1">
-                    <User className="w-4 h-4" />
+                <button
+                  onClick={() => {
+                    onNavigate('profile');
+                    setIsMenuOpen(false);
+                  }}
+                  className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-300 hover:bg-slate-700 hover:text-white rounded-md"
+                >
+                  <User className="w-4 h-4" />
+                  <div className="flex items-center gap-2">
                     <span>{profile.full_name}</span>
+                    <span className="px-2 py-1 bg-amber-500 rounded text-xs font-semibold">
+                      {profile.role}
+                    </span>
                   </div>
-                  <span className="px-2 py-1 bg-amber-500 rounded text-xs font-semibold">
-                    {profile.role}
-                  </span>
-                </div>
+                </button>
                 <button
                   onClick={() => {
                     handleSignOut();

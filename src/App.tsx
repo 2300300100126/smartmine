@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard';
 import About from './pages/About';
 import Login from './pages/Login';
 import SignUp from './pages/SignUp';
+import Profile from './pages/Profile';
 
 function App() {
   const [currentPage, setCurrentPage] = useState('home');
@@ -22,6 +23,8 @@ function App() {
         return <Login onNavigate={setCurrentPage} />;
       case 'signup':
         return <SignUp onNavigate={setCurrentPage} />;
+      case 'profile':
+        return <Profile />;
       default:
         return <Home />;
     }
